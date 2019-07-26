@@ -82,5 +82,53 @@ Describe lsp#utils#diff
             let got = lsp#utils#diff#compute(lines1, lines2)
             Assert Equals(got, want)
         End
+
+        It should return diff for multibyte character(utf16 code units is 1)
+            let lines1 = [
+            \  'foo',
+            \  'bar',
+            \  'baz'
+            \]
+            let lines2 = [
+            \  'foo',
+            \  'baあ',
+            \  'baz'
+            \]
+            let want = {
+            \  'range': {
+            \    'start': { 'line': 1, 'character': 2 },
+            \    'end': { 'line': 1, 'character': 3, }
+            \  },
+            \  'text': "あ",
+            \  "rangeLength": 1
+            \}
+            let got = lsp#utils#diff#compute(lines1, lines2)
+            Assert Equals(got, want)
+        End
+
+        It should return diff for multibyte character(utf16 code units greater than 2)
+            Skip This test case is not supported now
+
+            let lines1 = [
+            \  'foo',
+            \  'bar',
+            \  'baz'
+            \]
+            let lines2 = [
+            \  'foo',
+            \  'b𐐀a',
+            \  'baz'
+            \]
+            let want = {
+            \  'range': {
+            \    'start': { 'line': 1, 'character': 1 },
+            \    'end': { 'line': 1, 'character': 3, }
+            \  },
+            \  'text': "𐐀",
+            \  "rangeLength": 1
+            \}
+            let got = lsp#utils#diff#compute(lines1, lines2)
+            Assert Equals(got, want)
+        End
     End
 End

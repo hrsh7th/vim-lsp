@@ -66,26 +66,31 @@ function! s:bufwidth() abort
 endfunction
 
 
-function! s:get_float_positioning(height, width) abort
+function! s:get_float_positioning(height, width, options) abort
     let l:height = a:height
     let l:width = a:width
     " For a start show it below/above the cursor
     " TODO: add option to configure it 'docked' at the bottom/top/right
     let l:y = winline()
-    if l:y + l:height >= winheight(0)
-      " Float does not fit
-      if l:y > l:height
-        " Fits above
-        let l:y = winline() - l:height - 1
-      elseif l:y - 2 > winheight(0) - l:y
-        " Take space above cursor
-        let l:y = 1
-        let l:height = winline()-2
-      else
-        " Take space below cursor
-        let l:height = winheight(0) -l:y
-      endif
+    if !has_key(a:options, 'window_align') || a:options.window_align == 'bottom'
+        if l:y + l:height >= winheight(0)
+          " Float does not fit
+          if l:y - 2 > l:height
+            " Fits above
+            let l:y = winline() - l:height -1
+          elseif l:y - 2 > winheight(0) - l:y
+            " Take space above cursor
+            let l:y = 1
+            let l:height = winline()-2
+          else
+            " Take space below cursor
+            let l:height = winheight(0) -l:y
+          endif
+        endif
+    elseif a:options.window_align == 'top'
+        let l:y -= l:height + 1
     endif
+
     let l:col = col('.')
     " Positioning is not window but screen relative
     let l:opts = {
@@ -111,7 +116,7 @@ function! lsp#ui#vim#output#floatingpreview(data) abort
         let l:height = min([g:lsp_preview_max_height, l:height])
     endif
 
-    let l:opts = s:get_float_positioning(l:height, l:width)
+    let l:opts = s:get_float_positioning(l:height, l:width, {})
 
     let s:winid = nvim_open_win(buf, v:true, l:opts)
     call nvim_win_set_option(s:winid, 'winhl', 'Normal:Pmenu,NormalNC:Pmenu')
@@ -167,12 +172,12 @@ function! s:setcontent(lines, ft) abort
   endif
 endfunction
 
-function! s:adjust_float_placement(bufferlines, maxwidth) abort
+function! s:adjust_float_placement(bufferlines, maxwidth, options) abort
     if s:use_nvim_float
       let l:win_config = {}
       let l:height = min([winheight(s:winid), a:bufferlines])
       let l:width = min([winwidth(s:winid), a:maxwidth])
-      let l:win_config = s:get_float_positioning(l:height, l:width)
+      let l:win_config = s:get_float_positioning(l:height, l:width, a:options)
       call nvim_win_set_config(s:winid, l:win_config )
     endif
 endfunction
@@ -290,6 +295,7 @@ function! lsp#ui#vim#output#preview(data, options) abort
        \ && type(g:lsp_preview_doubletap) == 3
        \ && len(g:lsp_preview_doubletap) >= 1
        \ && type(g:lsp_preview_doubletap[0]) == 2
+       \ && !has_key(a:options, 'insert_mode')
         echo ''
         return call(g:lsp_preview_doubletap[0], [])
     endif
@@ -343,9 +349,16 @@ function! lsp#ui#vim#output#preview(data, options) abort
     if s:winid && (s:use_vim_popup || s:use_nvim_float)
       if s:use_nvim_float
         " Neovim floats
-        call s:adjust_float_placement(l:bufferlines, l:maxwidth)
+        call s:adjust_float_placement(l:bufferlines, l:maxwidth, a:options)
         call s:set_cursor(l:current_window_id, a:options)
-        call s:add_float_closing_hooks()
+        if has_key(a:options, 'insert_mode')
+            augroup lsp_float_preview_close
+                autocmd! lsp_float_preview_close InsertLeave
+                autocmd! InsertLeave * call lsp#ui#vim#output#closepreview()
+            augroup END
+        else
+            call s:add_float_closing_hooks()
+        endif
       elseif s:use_vim_popup
         " Vim popups
         call s:set_cursor(l:current_window_id, a:options)

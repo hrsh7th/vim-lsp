@@ -163,7 +163,9 @@ function! s:register_events() abort
         if exists('##TextChangedP')
             autocmd TextChangedP * call s:on_text_document_did_change()
         endif
+        autocmd InsertEnter * call s:on_insert_enter()
         autocmd CursorMoved * call s:on_cursor_moved()
+        autocmd CursorMovedI * call s:on_cursor_moved_i()
         autocmd BufWinEnter,BufWinLeave,InsertEnter * call lsp#ui#vim#references#clean_references()
         autocmd CursorMoved * if g:lsp_highlight_references_enabled | call lsp#ui#vim#references#highlight(v:false) | endif
     augroup END
@@ -202,10 +204,22 @@ function! s:on_text_document_did_change() abort
     call s:add_didchange_queue(l:buf)
 endfunction
 
+function! s:on_insert_enter() abort
+    let l:buf = bufnr('%')
+    if getbufvar(l:buf, '&buftype') ==# 'terminal' | return | endif
+    call lsp#ui#vim#signature_help#get_signature_help_under_cursor()
+endfunction
+
 function! s:on_cursor_moved() abort
     let l:buf = bufnr('%')
     if getbufvar(l:buf, '&buftype') ==# 'terminal' | return | endif
     call lsp#ui#vim#diagnostics#echo#cursor_moved()
+endfunction
+
+function! s:on_cursor_moved_i() abort
+    let l:buf = bufnr('%')
+    if getbufvar(l:buf, '&buftype') ==# 'terminal' | return | endif
+    call lsp#ui#vim#signature_help#get_signature_help_under_cursor()
 endfunction
 
 function! s:call_did_save(buf, server_name, result, cb) abort

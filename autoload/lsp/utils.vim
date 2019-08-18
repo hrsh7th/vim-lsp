@@ -185,3 +185,16 @@ function! lsp#utils#echo_with_truncation(msg) abort
 
     exec 'echo l:msg'
 endfunction
+
+function! lsp#utils#in_range(pos, range) abort
+    let l:in_line = a:range['start']['line'] <= a:pos['line'] && a:pos['line'] <= a:range['end']['line']
+    if (a:range['end']['line'] - a:range['start']['line']) == 0
+        return l:in_line && a:range['start']['character'] <= a:pos['character'] && a:pos['character'] <= a:range['end']['character']
+    endif
+    if a:range['start']['line'] == a:pos['line']
+        return l:in_line && a:range['start']['character'] <= a:pos['character']
+    elseif a:range['end']['line'] == a:pos['line']
+        return l:in_line && a:pos['character'] <= a:range['end']['character']
+    endif
+    return l:in_line
+endfunction

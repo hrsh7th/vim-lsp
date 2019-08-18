@@ -358,33 +358,28 @@ endfunction
 " https://microsoft.github.io/language-server-protocol/specification#textDocument_codeAction
 function! lsp#ui#vim#code_action() abort
     let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_code_action_provider(v:val)')
-    let s:last_req_id = s:last_req_id + 1
-    let l:diagnostic = lsp#ui#vim#diagnostics#get_diagnostics_under_cursor()
-
     if len(l:servers) == 0
         call s:not_supported('Code action')
         return
     endif
 
-    let l:range = s:get_visual_selection_range()
-    if empty(l:range)
-        if empty(l:diagnostic)
-            echo 'No diagnostics found under the cursors'
-            return
-        else
-            let l:range = l:diagnostic['range']
-            let l:diagnostics = [l:diagnostic]
-        end
-    else
-        let l:diagnostics = []
+    let l:selection_range = s:get_visual_selection_range()
+    if empty(l:selection_range)
+        let l:selection_range = {
+                    \ 'start': { 'line': line('.') - 1, 'character': 0 },
+                    \ 'end': { 'line': line('.') - 1, 'character': strchars(getline('.')) }
+                    \ }
     endif
 
+    let s:last_req_id = s:last_req_id + 1
     for l:server in l:servers
+        let l:diagnostics = lsp#ui#vim#diagnostics#get_diagnostics_for_code_action(l:server, l:selection_range)
+        let l:diagnostics_range = lsp#ui#vim#diagnostics#get_range_from_diagnostics(l:diagnostics)
         call lsp#send_request(l:server, {
             \ 'method': 'textDocument/codeAction',
             \ 'params': {
             \   'textDocument': lsp#get_text_document_identifier(),
-            \   'range': l:range,
+            \   'range': !empty(l:diagnostics_range) ? l:diagnostics_range : l:selection_range,
             \   'context': {
             \       'diagnostics' : l:diagnostics,
             \   },

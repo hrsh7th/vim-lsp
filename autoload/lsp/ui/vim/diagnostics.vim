@@ -51,6 +51,56 @@ function! lsp#ui#vim#diagnostics#document_diagnostics() abort
     endif
 endfunction
 
+function! lsp#ui#vim#diagnostics#get_range_from_diagnostics(diagnostics) abort
+    if len(a:diagnostics) == 0
+        return {}
+    endif
+
+    let l:range = a:diagnostics[0]['range']
+    for l:diagnostic in a:diagnostics
+        " find shortest range start.
+        let l:start_line_diff = l:diagnostic['range']['start']['line'] - l:range['start']['line']
+        let l:start_char_diff = l:diagnostic['range']['start']['character'] - l:range['start']['character']
+        if l:start_line_diff < 0 || (l:start_line_diff == 0 && l:start_char_diff < 0)
+            let l:range['start']['line'] = l:diagnostic['range']['start']['line']
+            let l:range['start']['character'] = 0
+        endif
+
+        " find largest range end.
+        let l:end_line_diff = l:diagnostic['range']['end']['line'] - l:range['end']['line']
+        let l:end_char_diff = l:diagnostic['range']['end']['character'] - l:range['end']['character']
+        if l:end_line_diff > 0 || (l:end_line_diff == 0 && l:end_char_diff > 0)
+            let l:range['end']['line'] = l:diagnostic['range']['end']['line'] + 1
+            let l:range['end']['character'] = 0
+        endif
+    endfor
+    return l:range
+endfunction
+
+function! lsp#ui#vim#diagnostics#get_diagnostics_for_code_action(server_name, range) abort
+    let [l:has_diagnostics, l:diagnostic_map] = s:get_diagnostics(lsp#utils#get_buffer_uri())
+    if !l:has_diagnostics
+        return []
+    endif
+
+    let l:diagnostics = []
+    for [l:server_name, l:data] in items(l:diagnostic_map)
+        if l:server_name !=# a:server_name
+            continue
+        endif
+
+        for l:diagnostic in l:data['response']['params']['diagnostics']
+            let l:in_start = lsp#utils#in_range(l:diagnostic['range']['start'], a:range)
+            let l:in_end = lsp#utils#in_range(l:diagnostic['range']['end'], a:range)
+            if l:in_start || l:in_end
+                call add(l:diagnostics, l:diagnostic)
+            endif
+        endfor
+    endfor
+
+    return l:diagnostics
+endfunction
+
 function! lsp#ui#vim#diagnostics#get_diagnostics_under_cursor() abort
     let l:diagnostics = s:get_all_buffer_diagnostics()
     if !len(l:diagnostics)

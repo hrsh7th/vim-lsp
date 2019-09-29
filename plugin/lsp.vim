@@ -48,7 +48,7 @@ if g:lsp_auto_enable
     augroup END
 endif
 
-command! -range LspCodeAction call lsp#ui#vim#code_action()
+command! -range LspCodeAction call lsp#ui#vim#code_action(<range>)
 command! LspDeclaration call lsp#ui#vim#declaration(0)
 command! LspPeekDeclaration call lsp#ui#vim#declaration(1)
 command! LspDefinition call lsp#ui#vim#definition(0)

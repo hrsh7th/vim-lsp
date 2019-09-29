@@ -358,30 +358,30 @@ function! s:get_visual_selection_range() abort
 endfunction
 
 " https://microsoft.github.io/language-server-protocol/specification#textDocument_codeAction
-function! lsp#ui#vim#code_action() abort
+function! lsp#ui#vim#code_action(range) abort
     let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_code_action_provider(v:val)')
     let s:last_req_id = s:last_req_id + 1
-    let l:diagnostic = lsp#ui#vim#diagnostics#get_diagnostics_under_cursor()
 
     if len(l:servers) == 0
         call s:not_supported('Code action')
         return
     endif
 
-    let l:range = s:get_visual_selection_range()
-    if empty(l:range)
-        if empty(l:diagnostic)
-            echo 'No diagnostics found under the cursors'
-            return
-        else
-            let l:range = l:diagnostic['range']
-            let l:diagnostics = [l:diagnostic]
-        end
-    else
-        let l:diagnostics = []
-    endif
 
+    let l:requested = v:false
     for l:server in l:servers
+        let l:range = s:get_visual_selection_range()
+        let l:diagnostics = []
+
+        let l:diagnostic = lsp#ui#vim#diagnostics#get_diagnostics_under_cursor(l:server)
+        if empty(l:range) || a:range == 0
+            if !empty(l:diagnostic)
+                let l:range = l:diagnostic['range']
+                let l:diagnostics = [l:diagnostic]
+            else
+                continue
+            endif
+        endif
         call lsp#send_request(l:server, {
             \ 'method': 'textDocument/codeAction',
             \ 'params': {
@@ -389,13 +389,19 @@ function! lsp#ui#vim#code_action() abort
             \   'range': l:range,
             \   'context': {
             \       'diagnostics' : l:diagnostics,
+            \       'only': ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source', 'source.organizeImports']
             \   },
             \ },
             \ 'on_notification': function('s:handle_code_action', [l:server, s:last_req_id, 'codeAction']),
             \ })
+        let l:requested = v:true
     endfor
 
-    echo 'Retrieving code actions ...'
+    if l:requested
+        echo 'Retrieving code actions ...'
+    else
+        echo 'No diagnostics or range found under the cursors'
+    endif
 endfunction
 
 function! s:handle_symbol(server, last_req_id, type, data) abort

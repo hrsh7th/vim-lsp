@@ -55,8 +55,8 @@ endfunction
 "
 " Note: Consider renaming this method (s/diagnostics/diagnostic) to make
 " it clear that it returns just one diagnostic, not a list.
-function! lsp#ui#vim#diagnostics#get_diagnostics_under_cursor() abort
-    let l:diagnostics = s:get_all_buffer_diagnostics()
+function! lsp#ui#vim#diagnostics#get_diagnostics_under_cursor(...) abort
+    let l:diagnostics = s:get_all_buffer_diagnostics(get(a:000, 0, ''))
     if !len(l:diagnostics)
         return
     endif
@@ -196,7 +196,8 @@ function! s:get_diagnostics(uri) abort
 endfunction
 
 " Get diagnostics for the current buffer URI from all servers
-function! s:get_all_buffer_diagnostics() abort
+function! s:get_all_buffer_diagnostics(...) abort
+    let l:server = get(a:000, 0, '')
     let l:uri = lsp#utils#get_buffer_uri()
 
     let [l:has_diagnostics, l:diagnostics] = s:get_diagnostics(l:uri)
@@ -206,6 +207,11 @@ function! s:get_all_buffer_diagnostics() abort
 
     let l:all_diagnostics = []
     for [l:server_name, l:data] in items(l:diagnostics)
+        if !empty(l:server)
+            if l:server !=# l:server_name
+                continue
+            endif
+        endif
         call extend(l:all_diagnostics, l:data['response']['params']['diagnostics'])
     endfor
 

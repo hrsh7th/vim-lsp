@@ -25,6 +25,10 @@ function! lsp#capabilities#has_hover_provider(server_name) abort
     return s:has_bool_provider(a:server_name, 'hoverProvider')
 endfunction
 
+function! lsp#capabilities#has_completion_resolve_provider(server_name) abort
+    return s:has_bool_provider(a:server_name, 'completionProvider', 'resolveProvider')
+endfunction
+
 function! lsp#capabilities#has_rename_provider(server_name) abort
     return s:has_bool_provider(a:server_name, 'renameProvider')
 endfunction

@@ -33,8 +33,21 @@ let s:completion_status_failed = 'failed'
 let s:completion_status_pending = 'pending'
 
 let s:is_user_data_support = has('patch-8.0.1493')
-let s:user_data_key = 'vim-lsp/textEdit'
-let s:user_data_additional_edits_key = 'vim-lsp/additionalTextEdits'
+let s:user_data_key = 'vim-lsp/user_data'
+
+" This status should clear when called CopleteDone.
+"
+" }
+"   'user_data_json_string': {
+"     'item': a:item,
+"     ... some data ...
+"   },
+"   'user_data_json_string': {
+"     'item': a:item,
+"     ... some data ...
+"   },
+" ]
+let s:completion_item_state_map = {}
 
 " }}}
 
@@ -220,29 +233,6 @@ function! lsp#omni#default_get_vim_completion_item(item, ...) abort
         call lsp#log(l:no_support_error_message)
     endif
 
-    " add user_data in completion item, when
-    "     1. provided user_data
-    "     2. provided textEdit or additionalTextEdits
-    "     3. textEdit value is Dictionary or additionalTextEdits is non-empty list
-    if g:lsp_text_edit_enabled
-        let l:text_edit = get(a:item, 'textEdit', v:null)
-        let l:additional_text_edits = get(a:item, 'additionalTextEdits', v:null)
-        let l:user_data = {}
-
-        " type check
-        if type(l:text_edit) == type({})
-            let l:user_data[s:user_data_key] = l:text_edit
-        endif
-
-        if type(l:additional_text_edits) == type([]) && !empty(l:additional_text_edits)
-            let l:user_data[s:user_data_additional_edits_key] = l:additional_text_edits
-        endif
-
-        if !empty(l:user_data)
-            let l:completion['user_data'] = json_encode(l:user_data)
-        endif
-    endif
-
     if has_key(a:item, 'detail') && !empty(a:item['detail'])
         let l:completion['menu'] = substitute(a:item['detail'], '[ \t\n\r]\+', ' ', 'g')
     endif
@@ -253,6 +243,10 @@ function! lsp#omni#default_get_vim_completion_item(item, ...) abort
         endif
     endif
 
+    let l:user_data = {}
+    let l:user_data[s:user_data_key] = { 'item': a:item }
+    let l:completion['user_data'] = json_encode(l:user_data)
+
     return l:completion
 endfunction
 
@@ -262,78 +256,86 @@ endfunction
 
 augroup lsp_completion_item_text_edit
     autocmd!
-    autocmd CompleteDone * call <SID>apply_text_edits()
+    autocmd CompleteChanged * call <SID>on_complete_changed()
+    autocmd CompleteDone * call <SID>on_complete_done()
+    autocmd User lsp_complete_done let s:completion_item_state_map = {}
 augroup END
 
-function! s:apply_text_edits() abort
-    " textEdit support function(callin from CompleteDone).
-    "
-    " expected user_data structure:
-    "     v:completed_item['user_data']: {
-    "       'vim-lsp/textEdit': {
-    "         'range': { ...(snip) },
-    "         'newText': 'yyy'
-    "       },
-    "       'vim-lsp/additionalTextEdits': [
-    "         {
-    "           'range': { ...(snip) },
-    "           'newText': 'yyy'
-    "         },
-    "         ...
-    "       ],
-    "     }
+function! s:on_complete_changed() abort
+    if empty(v:completed_item)
+        return
+    endif
+
+    let l:item_state = s:get_item_state(v:completed_item)
+    if empty(l:item_state)
+        return
+    endif
+
+    " completionItem/resolve had requested.
+    if get(l:item_state, 'resolve_requested', v:false)
+        return
+    endif
+
+    let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_completion_resolve_provider(v:val)')
+    if len(l:servers) > 0
+        let l:item_state['resolve_requested'] = v:true
+        call lsp#send_request(l:servers[0], {
+                    \   'method': 'completionItem/resolve',
+                    \   'params': l:item_state['item'],
+                    \   'on_notification': function('s:handle_completion_resolve', [v:completed_item])
+                    \ })
+    endif
+endfunction
+
+function! s:on_complete_done() abort
     if !g:lsp_text_edit_enabled
         doautocmd User lsp_complete_done
         return
     endif
 
-    " completion faild or not select complete item
     if empty(v:completed_item)
         doautocmd User lsp_complete_done
         return
     endif
 
-    " check user_data
-    if !has_key(v:completed_item, 'user_data')
+    " get managed item state ignore if empty.
+    let l:item_state = s:get_item_state(v:completed_item)
+    if empty(l:item_state)
         doautocmd User lsp_complete_done
         return
     endif
 
-    " check user_data type is Dictionary and user_data['vim-lsp/textEdit']
-    try
-        let l:user_data = json_decode(v:completed_item['user_data'])
-    catch
-        " do nothing if user_data is not json type string.
-        doautocmd User lsp_complete_done
-        return
-    endtry
-
-    if type(l:user_data) != type({})
-        doautocmd User lsp_complete_done
-        return
+    " if was not requested to resolve completion, send request.
+    if get(l:item_state, 'resolve_requested', v:false)
+        let l:servers = filter(lsp#get_whitelisted_servers(), 'lsp#capabilities#has_completion_resolve_provider(v:val)')
+        if len(l:servers) > 0
+            let l:item_state['resolve_requested'] = v:true
+            call lsp#send_request(l:servers[0], {
+                        \   'method': 'completionItem/resolve',
+                        \   'params': l:item_state['item'],
+                        \   'sync': v:true,
+                        \   'on_notification': function('s:handle_completion_resolve', [v:completed_item])
+                        \ })
+        endif
     endif
 
+    " create text edits.
     let l:all_text_edits = []
-
-    " expand textEdit range, for omni complet inserted text.
-    let l:text_edit = get(l:user_data, s:user_data_key, {})
+    let l:text_edit = get(l:item_state['resolve_item'], 'textEdit', {})
     if !empty(l:text_edit)
         let l:expanded_text_edit = s:expand_range(l:text_edit, strchars(v:completed_item['word']))
         call add(l:all_text_edits, l:expanded_text_edit)
     endif
 
-    if has_key(l:user_data, s:user_data_additional_edits_key)
-        let l:all_text_edits += l:user_data[s:user_data_additional_edits_key]
+    let l:additional_text_edits = get(l:item_state['resolve_item'], 'additionalTextEdits', {})
+    if !empty(l:additional_text_edits)
+        let l:all_text_edits += l:additional_text_edits
     endif
 
-    " save cursor position in a mark, vim will move it appropriately when
-    " applying edits
     let l:saved_mark = getpos("'a")
     " move to end of newText but in two steps (as column may not exist yet)
     let [l:pos, l:col_offset] = s:get_cursor_pos_and_edit_length(l:text_edit)
     call setpos("'a", l:pos)
-
-    " apply textEdits
     if !empty(l:all_text_edits)
         call lsp#utils#text_edit#apply_text_edits(lsp#utils#get_buffer_uri(), l:all_text_edits)
     endif
@@ -344,6 +346,19 @@ function! s:apply_text_edits() abort
     call setpos('.', l:pos)
 
     doautocmd User lsp_complete_done
+endfunction
+
+function! s:handle_completion_resolve(item, data) abort
+    if lsp#client#is_error(a:data) || !has_key(a:data, 'response') || !has_key(a:data['response'], 'result')
+        return
+    endif
+
+    let l:item_state = s:get_item_state(a:item)
+    let l:item_state['resolve_responsed'] = v:true
+    let l:item_state['resolve_item'] = a:data['response']['result']
+    if empty(l:item_state['resolve_item'])
+        let l:item_state['resolve_item'] = {}
+    endif
 endfunction
 
 function! s:expand_range(text_edit, expand_length) abort
@@ -371,6 +386,30 @@ endfunction
 
 function! lsp#omni#get_completion_item_kinds() abort
     return map(keys(s:kind_text_mappings), {idx, key -> str2nr(key)})
+endfunction
+
+function! s:get_item_state(item) abort
+    try
+        let l:user_data = json_decode(a:item['user_data'])
+    catch
+        let l:user_data = {}
+    endtry
+
+    if !has_key(l:user_data, s:user_data_key)
+        return {}
+    endif
+
+    let l:user_data_json_str = a:item['user_data']
+    if !has_key(s:completion_item_state_map, l:user_data_json_str)
+        let s:completion_item_state_map[l:user_data_json_str] = {
+                \   'item': get(l:user_data[s:user_data_key], 'item', {}),
+                \   'resolve_requested': v:false,
+                \   'resolve_responsed': v:false,
+                \   'resolve_item': {}
+                \ }
+    endif
+
+    return s:completion_item_state_map[l:user_data_json_str]
 endfunction
 
 " }}}

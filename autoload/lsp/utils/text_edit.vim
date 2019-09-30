@@ -16,38 +16,43 @@ function! lsp#utils#text_edit#apply_text_edits(uri, text_edits) abort
     " ((0, 0), (0, 1), "") - remove first character 'a'
     " ((0, 4), (0, 5), "") - remove fifth character 'e'
     " ((0, 2), (0, 3), "") - remove third character 'c'
-    let l:text_edits = sort(deepcopy(a:text_edits), '<SID>sort_text_edit_desc')
 
-    let l:path = lsp#utils#uri_to_path(a:uri)
-    let l:bufnr = bufnr(l:path, v:true)
-    if !bufloaded(l:path)
-        call bufload(l:path)
-        call setbufvar(l:bufnr, '&buflisted', v:true)
-    else
+    let l:current_bufnr = bufnr('%')
+    try
+        let l:path = lsp#utils#uri_to_path(a:uri)
         let l:bufnr = bufnr(l:path)
-    endif
-
-    let l:fixendofline = lsp#utils#buffer#get_fixendofline(l:bufnr)
-    let l:total_lines = len(getbufline(l:bufnr, '^', '$'))
-
-    let l:i = 0
-    while l:i < len(l:text_edits)
-        let l:merged_text_edit = s:merge_same_range(l:i, l:text_edits)
-        let l:text_edit = l:merged_text_edit['merged']
-        let l:end_index = l:merged_text_edit['end_index']
-        let l:lines = split(l:text_edit['newText'], "\n", v:true)
-
-        if l:fixendofline
-                    \ && l:lines[-1] ==# ''
-                    \ && l:total_lines <= l:text_edit['range']['end']['line']
-                    \ && l:text_edit['range']['end']['character'] == 0
-            call remove(l:lines, -1)
+        if l:bufnr == -1
+            execute printf('keepjumps keepalt edit %s', l:path)
+            let l:bufnr = bufnr('%')
+        else
+            execute printf('keepjumps keepalt buffer %s', l:bufnr)
         endif
 
-        call s:apply_text_edit(l:bufnr, s:parse_range(l:text_edit['range']), l:lines)
+        let l:fixendofline = lsp#utils#buffer#get_fixendofline(l:bufnr)
+        let l:total_lines = len(getbufline(l:bufnr, '^', '$'))
 
-        let l:i = l:end_index
-    endwhile
+        let l:text_edits = sort(deepcopy(a:text_edits), '<SID>sort_text_edit_desc')
+        let l:i = 0
+        while l:i < len(l:text_edits)
+            let l:merged_text_edit = s:merge_same_range(l:i, l:text_edits)
+            let l:text_edit = l:merged_text_edit['merged']
+            let l:end_index = l:merged_text_edit['end_index']
+            let l:lines = split(l:text_edit['newText'], "\n", v:true)
+
+            if l:fixendofline
+                        \ && l:lines[-1] ==# ''
+                        \ && l:total_lines <= l:text_edit['range']['end']['line']
+                        \ && l:text_edit['range']['end']['character'] == 0
+                call remove(l:lines, -1)
+            endif
+
+            call s:apply_text_edit(l:bufnr, s:parse_range(l:text_edit['range']), l:lines)
+
+            let l:i = l:end_index
+        endwhile
+    finally
+        execute printf('keepjumps keepalt buffer %s', l:current_bufnr)
+    endtry
 endfunction
 
 function! s:apply_text_edit(buf, range, lines) abort

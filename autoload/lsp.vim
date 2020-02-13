@@ -184,10 +184,10 @@ function! s:register_events() abort
         autocmd BufWritePost * call s:on_text_document_did_save()
         autocmd BufWinLeave * call s:on_text_document_did_close()
         autocmd BufWipeout * call s:on_buf_wipeout(bufnr('<afile>'))
-        autocmd InsertLeave * call s:on_text_document_did_change()
-        autocmd TextChanged * call s:on_text_document_did_change()
         if exists('##TextChangedP')
-            autocmd TextChangedP * call s:on_text_document_did_change()
+            autocmd TextChanged,TextChangedI,InsertLeave,TextChangedP * call s:on_text_document_did_change()
+        else
+            autocmd TextChanged,TextChangedI,InsertLeave * call s:on_text_document_did_change()
         endif
         if g:lsp_diagnostics_echo_cursor || g:lsp_diagnostics_float_cursor || g:lsp_highlight_references_enabled
             autocmd CursorMoved * call s:on_cursor_moved()
@@ -889,8 +889,7 @@ function! s:add_didchange_queue(buf) abort
     call add(s:didchange_queue, a:buf)
     call lsp#log('s:send_didchange_queue() will be triggered')
     call timer_stop(s:didchange_timer)
-    let l:lazy = &updatetime > 1000 ? &updatetime : 1000
-    let s:didchange_timer = timer_start(l:lazy, function('s:send_didchange_queue'))
+    let s:didchange_timer = timer_start(g:lsp_did_change_send_delay, function('s:send_didchange_queue'))
 endfunction
 
 function! s:send_didchange_queue(...) abort

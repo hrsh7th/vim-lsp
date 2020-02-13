@@ -1,23 +1,57 @@
 let s:is_win = has('win32') || has('win64')
-let s:diagnostics = {} " { uri: { 'server_name': response } }
+let s:diagnostics = {} " { path: { 'server_name': response } }
+let s:update_diagnostics_timers = {}
 
 function! lsp#ui#vim#diagnostics#handle_text_document_publish_diagnostics(server_name, data) abort
     if lsp#client#is_error(a:data['response'])
         return
     endif
+
+    " prepare
     let l:uri = a:data['response']['params']['uri']
-    if s:is_win
-        let l:uri = substitute(l:uri, '^file:///[a-zA-Z]\zs%3[aA]', ':', '')
-    endif
     if !has_key(s:diagnostics, l:uri)
         let s:diagnostics[l:uri] = {}
     endif
-    let s:diagnostics[l:uri][a:server_name] = a:data
+    if !has_key(s:diagnostics[l:uri], a:server_name)
+        let s:diagnostics[l:uri][a:server_name] = {}
+    endif
+    let l:prev_diagnostics = !empty(s:diagnostics[l:uri][a:server_name]) ? s:diagnostics[l:uri][a:server_name]['response']['params']['diagnostics'] : []
+    let l:next_diagnostics = a:data['response']['params']['diagnostics']
 
-    call lsp#ui#vim#virtual#set(a:server_name, a:data)
-    call lsp#ui#vim#highlights#set(a:server_name, a:data)
-    call lsp#ui#vim#diagnostics#textprop#set(a:server_name, a:data)
-    call lsp#ui#vim#signs#set(a:server_name, a:data)
+    " stop currently waiting update timer.
+    call timer_stop(get(s:update_diagnostics_timers, l:uri, -1))
+
+    " ignore unchanged.
+    if len(l:prev_diagnostics) == 0 && len(l:next_diagnostics) == 0
+        return
+    endif
+
+    let l:changedtick = getbufvar(lsp#utils#uri_to_path(l:uri), 'changedtick', 0)
+    if len(l:prev_diagnostics) > len(l:next_diagnostics)
+        " updated immediately if diagnostics was decreased.
+        call s:handle_text_document_publish_diagnostics(a:server_name, a:data, v:true, l:changedtick)
+    else
+        " debounced update if diagnostics was increased.
+        let l:delay = mode()[0] ==# 'i' ? 500 : 200
+        let s:update_diagnostics_timers[l:uri] = timer_start(l:delay, { ->
+        \   s:handle_text_document_publish_diagnostics(a:server_name, a:data, v:false, l:changedtick)
+        \ })
+    endif
+endfunction
+
+function! s:handle_text_document_publish_diagnostics(server_name, data, force, changedtick) abort
+    let l:uri = a:data['response']['params']['uri']
+    let l:is_document_outdated = a:changedtick != getbufvar(lsp#utils#uri_to_path(l:uri), 'changedtick', 0)
+
+    " skip update if document outdated at the timing.
+    " the server will publish newer diagnostics later.
+    if a:force || !l:is_document_outdated
+        let s:diagnostics[l:uri][a:server_name] = a:data
+        call lsp#ui#vim#virtual#set(a:server_name, a:data)
+        call lsp#ui#vim#highlights#set(a:server_name, a:data)
+        call lsp#ui#vim#diagnostics#textprop#set(a:server_name, a:data)
+        call lsp#ui#vim#signs#set(a:server_name, a:data)
+    endif
 endfunction
 
 function! lsp#ui#vim#diagnostics#document_diagnostics() abort
@@ -229,6 +263,9 @@ function! s:get_all_buffer_diagnostics(...) abort
 
     let l:all_diagnostics = []
     for [l:server_name, l:data] in items(l:diagnostics)
+        if empty(l:data)
+            continue
+        endif
         if empty(l:target_server_name) || l:server_name ==# l:target_server_name
             call extend(l:all_diagnostics, l:data['response']['params']['diagnostics'])
         endif
@@ -269,6 +306,10 @@ function! lsp#ui#vim#diagnostics#get_buffer_diagnostics_counts() abort
     let l:uri = lsp#utils#get_buffer_uri()
     let [l:has_diagnostics, l:diagnostics] = s:get_diagnostics(l:uri)
     for [l:server_name, l:data] in items(l:diagnostics)
+        if empty(l:data)
+            continue
+        endif
+
         for l:diag in l:data['response']['params']['diagnostics']
             let l:key = get(s:diagnostic_kinds, l:diag['severity'], 'error')
             let l:counts[l:key] += 1
@@ -282,6 +323,10 @@ function! lsp#ui#vim#diagnostics#get_buffer_first_error_line() abort
     let [l:has_diagnostics, l:diagnostics] = s:get_diagnostics(l:uri)
     let l:first_error_line = v:null
     for [l:server_name, l:data] in items(l:diagnostics)
+        if empty(l:data)
+            continue
+        endif
+
         for l:diag in l:data['response']['params']['diagnostics']
             if l:diag['severity'] ==# 1 && (l:first_error_line ==# v:null || l:first_error_line ># l:diag['range']['start']['line'])
                 let l:first_error_line = l:diag['range']['start']['line']

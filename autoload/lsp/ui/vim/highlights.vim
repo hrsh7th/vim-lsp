@@ -59,6 +59,10 @@ function! lsp#ui#vim#highlights#set(server_name, data) abort
     let l:diagnostics = a:data['response']['params']['diagnostics']
     let l:path = lsp#utils#uri_to_path(l:uri)
 
+    if !bufexists(l:path) || !bufloaded(l:path)
+        return
+    endif
+
     call s:clear_highlights(a:server_name, l:path)
     call s:place_highlights(a:server_name, l:path, l:diagnostics)
 endfunction

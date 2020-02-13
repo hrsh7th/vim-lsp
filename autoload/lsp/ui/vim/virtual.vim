@@ -100,6 +100,10 @@ function! lsp#ui#vim#virtual#set(server_name, data) abort
 
     let l:path = lsp#utils#uri_to_path(l:uri)
 
+    if !bufexists(l:path) || !bufloaded(l:path)
+        return
+    endif
+
     " will always replace existing set
     call s:clear_virtual(a:server_name, l:path)
     call s:place_virtual(a:server_name, l:path, l:diagnostics)
